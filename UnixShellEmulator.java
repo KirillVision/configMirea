@@ -8,6 +8,7 @@ import java.io.BufferedReader;
 import java.io.FileReader;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Calendar;
 
 public class UnixShellEmulator {
     private JFrame frame;
@@ -158,6 +159,10 @@ public class UnixShellEmulator {
             return cd(args);
         } else if ("pwd".equals(command)) {
             return pwd(args);
+        } else if ("echo".equals(command)) {
+            return echo(args);
+        } else if ("cal".equals(command)) {
+            return cal(args);
         } else if ("conf-dump".equals(command)) {
             return confDump(args);
         } else if ("exit".equals(command)) {
@@ -189,6 +194,55 @@ public class UnixShellEmulator {
     private String pwd(String[] args) {
         if (args.length > 0) return "Error: pwd takes no arguments";
         return vfs.pwd();
+    }
+
+    private String echo(String[] args) {
+        String result = "";
+        for (String arg : args) {
+            result += arg + " ";
+        }
+        return result.trim();
+    }
+
+    private String cal(String[] args) {
+        if (args.length > 0) {
+            return "Error: cal takes no arguments";
+        }
+
+        Calendar calendar = Calendar.getInstance();
+        int month = calendar.get(Calendar.MONTH) + 1;
+        int year = calendar.get(Calendar.YEAR);
+
+        // Простой календарь для текущего месяца
+        String[] monthNames = {
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"
+        };
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("    ").append(monthNames[month - 1]).append(" ").append(year).append("\n");
+        sb.append("Su Mo Tu We Th Fr Sa\n");
+
+        // Создаем календарь для первого дня месяца
+        Calendar cal = Calendar.getInstance();
+        cal.set(year, month - 1, 1);
+        int firstDayOfWeek = cal.get(Calendar.DAY_OF_WEEK);
+        int daysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH);
+
+        // Отступ для первого дня
+        for (int i = 1; i < firstDayOfWeek; i++) {
+            sb.append("   ");
+        }
+
+        // Выводим дни
+        for (int day = 1; day <= daysInMonth; day++) {
+            sb.append(String.format("%2d ", day));
+            if ((day + firstDayOfWeek - 1) % 7 == 0) {
+                sb.append("\n");
+            }
+        }
+
+        return sb.toString();
     }
 
     private String confDump(String[] args) {
