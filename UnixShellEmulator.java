@@ -6,12 +6,15 @@ import java.awt.event.*;
 import java.util.ArrayList;
 import java.io.BufferedReader;
 import java.io.FileReader;
+import java.util.HashMap;
+import java.util.Map;
 
 public class UnixShellEmulator {
     private JFrame frame;
     private JTextArea outputArea;
     private JTextField inputField;
     private Config config;
+    private VirtualFileSystem vfs;
 
     public static void main(String[] args) {
         UnixShellEmulator emulator = new UnixShellEmulator();
@@ -21,6 +24,7 @@ public class UnixShellEmulator {
     }
 
     public void start() {
+        vfs = new VirtualFileSystem(config.vfsPath);
         createGUI();
 
         if (config.startupScript != null) {
@@ -29,7 +33,11 @@ public class UnixShellEmulator {
     }
 
     private void createGUI() {
-        frame = new JFrame("VFS Emulator");
+        String title = "VFS Emulator";
+        if (config.vfsPath != null) {
+            title += " - " + config.vfsPath;
+        }
+        frame = new JFrame(title);
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setSize(800, 500);
 
@@ -145,20 +153,11 @@ public class UnixShellEmulator {
 
     private String processCommand(String command, String[] args) {
         if ("ls".equals(command)) {
-            String argsStr = "";
-            for (String arg : args) {
-                argsStr += arg + " ";
-            }
-            return "ls called with args: " + argsStr.trim();
+            return ls(args);
         } else if ("cd".equals(command)) {
-            if (args.length > 1) {
-                return "Error: cd takes 0 or 1 arguments";
-            }
-            String argsStr = "";
-            for (String arg : args) {
-                argsStr += arg + " ";
-            }
-            return "cd called with args: " + argsStr.trim();
+            return cd(args);
+        } else if ("pwd".equals(command)) {
+            return pwd(args);
         } else if ("conf-dump".equals(command)) {
             return confDump(args);
         } else if ("exit".equals(command)) {
@@ -166,6 +165,30 @@ public class UnixShellEmulator {
         } else {
             return "Error: Unknown command '" + command + "'";
         }
+    }
+
+    private String ls(String[] args) {
+        String path = args.length > 0 ? args[0] : null;
+        ArrayList<String> files = vfs.list(path);
+        if (files == null) return "Error: Directory not found";
+
+        String result = "";
+        for (String file : files) {
+            result += file + "  ";
+        }
+        return result.trim();
+    }
+
+    private String cd(String[] args) {
+        if (args.length > 1) return "Error: cd takes 0 or 1 arguments";
+        String path = args.length == 0 ? "/" : args[0];
+        if (vfs.cd(path)) return "";
+        return "Error: Directory not found";
+    }
+
+    private String pwd(String[] args) {
+        if (args.length > 0) return "Error: pwd takes no arguments";
+        return vfs.pwd();
     }
 
     private String confDump(String[] args) {
@@ -247,5 +270,147 @@ class Config {
         if (startupScript == null) {
             System.out.println("  Startup Script: (not specified)");
         }
+    }
+}
+
+class VirtualFileSystem {
+    private Node root;
+    private Node current;
+    private String physicalPath;
+
+    class Node {
+        String name;
+        boolean isDir;
+        HashMap<String, Node> children;
+        Node parent;
+        String owner;
+
+        Node(String name, boolean isDir) {
+            this.name = name;
+            this.isDir = isDir;
+            this.owner = "user";
+            if (isDir) children = new HashMap<>();
+        }
+    }
+
+    public VirtualFileSystem(String physicalPath) {
+        this.physicalPath = physicalPath;
+        root = new Node("/", true);
+        current = root;
+        setupBasicStructure();
+
+        if (physicalPath != null) {
+            System.out.println("Loading VFS from: " + physicalPath);
+        }
+    }
+
+    private void setupBasicStructure() {
+        // Создаем базовую структуру папок (3 уровня вложенности)
+        Node home = addNode(root, "home", true);
+        Node user = addNode(home, "user", true);
+        Node documents = addNode(user, "documents", true);
+        Node downloads = addNode(user, "downloads", true);
+
+        // Файлы
+        addNode(user, "readme.txt", false);
+        addNode(documents, "file1.doc", false);
+        addNode(documents, "file2.doc", false);
+        addNode(downloads, "archive.zip", false);
+
+        // Еще один уровень
+        Node projects = addNode(user, "projects", true);
+        addNode(projects, "project1", true);
+        addNode(projects, "project2", true);
+    }
+
+    private Node addNode(Node parent, String name, boolean isDir) {
+        Node node = new Node(name, isDir);
+        node.parent = parent;
+        if (parent.isDir) {
+            parent.children.put(name, node);
+        }
+        return node;
+    }
+
+    public ArrayList<String> list(String path) {
+        Node target = path == null ? current : resolvePath(path);
+        if (target == null || !target.isDir) return null;
+
+        ArrayList<String> result = new ArrayList<>();
+        for (Node child : target.children.values()) {
+            result.add(child.name + (child.isDir ? "/" : ""));
+        }
+        return result;
+    }
+
+    public boolean cd(String path) {
+        Node target = resolvePath(path);
+        if (target != null && target.isDir) {
+            current = target;
+            return true;
+        }
+        return false;
+    }
+
+    public String pwd() {
+        ArrayList<String> path = new ArrayList<>();
+        Node node = current;
+
+        while (node != root) {
+            path.add(0, node.name);
+            node = node.parent;
+        }
+
+        if (path.isEmpty()) {
+            return "/";
+        }
+
+        return "/" + String.join("/", path);
+    }
+
+    private Node resolvePath(String path) {
+        if (path == null || path.isEmpty()) {
+            return current;
+        }
+
+        if (path.startsWith("/")) {
+            return resolveAbsolute(path);
+        } else {
+            return resolveRelative(path);
+        }
+    }
+
+    private Node resolveAbsolute(String path) {
+        String[] parts = path.split("/");
+        Node current = root;
+
+        for (String part : parts) {
+            if (part.isEmpty()) continue;
+            if ("..".equals(part)) {
+                if (current.parent != null) current = current.parent;
+            } else if (!".".equals(part)) {
+                if (current.children == null) return null;
+                current = current.children.get(part);
+                if (current == null) return null;
+            }
+        }
+        return current;
+    }
+
+    private Node resolveRelative(String path) {
+        String[] parts = path.split("/");
+        Node current = this.current;
+
+        for (String part : parts) {
+            if (part.isEmpty()) continue;
+            if ("..".equals(part)) {
+                if (current.parent != null) current = current.parent;
+            } else if (!".".equals(part)) {
+                if (current.children == null) return null;
+                current = current.children.get(part);
+                if (current == null) return null;
+            }
+        }
+        return current;
     }
 }
