@@ -163,6 +163,12 @@ public class UnixShellEmulator {
             return echo(args);
         } else if ("cal".equals(command)) {
             return cal(args);
+        } else if ("rmdir".equals(command)) {
+            return rmdir(args);
+        } else if ("chown".equals(command)) {
+            return chown(args);
+        } else if ("help".equals(command)) {
+            return help(args);
         } else if ("conf-dump".equals(command)) {
             return confDump(args);
         } else if ("exit".equals(command)) {
@@ -213,7 +219,6 @@ public class UnixShellEmulator {
         int month = calendar.get(Calendar.MONTH) + 1;
         int year = calendar.get(Calendar.YEAR);
 
-        // Простой календарь для текущего месяца
         String[] monthNames = {
                 "January", "February", "March", "April", "May", "June",
                 "July", "August", "September", "October", "November", "December"
@@ -223,18 +228,15 @@ public class UnixShellEmulator {
         sb.append("    ").append(monthNames[month - 1]).append(" ").append(year).append("\n");
         sb.append("Su Mo Tu We Th Fr Sa\n");
 
-        // Создаем календарь для первого дня месяца
         Calendar cal = Calendar.getInstance();
         cal.set(year, month - 1, 1);
         int firstDayOfWeek = cal.get(Calendar.DAY_OF_WEEK);
         int daysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH);
 
-        // Отступ для первого дня
         for (int i = 1; i < firstDayOfWeek; i++) {
             sb.append("   ");
         }
 
-        // Выводим дни
         for (int day = 1; day <= daysInMonth; day++) {
             sb.append(String.format("%2d ", day));
             if ((day + firstDayOfWeek - 1) % 7 == 0) {
@@ -243,6 +245,32 @@ public class UnixShellEmulator {
         }
 
         return sb.toString();
+    }
+
+    private String rmdir(String[] args) {
+        if (args.length != 1) return "Error: rmdir takes 1 argument";
+        if (vfs.rmdir(args[0])) return "";
+        return "Error: Cannot remove directory";
+    }
+
+    private String chown(String[] args) {
+        if (args.length != 2) return "Error: chown takes 2 arguments";
+        if (vfs.chown(args[1], args[0])) return "";
+        return "Error: Cannot change owner";
+    }
+
+    private String help(String[] args) {
+        return "Available commands:\n" +
+                "ls      - List directory contents\n" +
+                "cd      - Change directory\n" +
+                "pwd     - Print working directory\n" +
+                "echo    - Display message\n" +
+                "cal     - Display calendar\n" +
+                "rmdir   - Remove directory\n" +
+                "chown   - Change file owner\n" +
+                "help    - Show this help\n" +
+                "conf-dump - Show configuration\n" +
+                "exit    - Exit emulator";
     }
 
     private String confDump(String[] args) {
@@ -364,12 +392,14 @@ class VirtualFileSystem {
         Node user = addNode(home, "user", true);
         Node documents = addNode(user, "documents", true);
         Node downloads = addNode(user, "downloads", true);
+        Node temp = addNode(user, "temp", true);
 
         // Файлы
         addNode(user, "readme.txt", false);
         addNode(documents, "file1.doc", false);
         addNode(documents, "file2.doc", false);
         addNode(downloads, "archive.zip", false);
+        addNode(temp, "to_delete", true);
 
         // Еще один уровень
         Node projects = addNode(user, "projects", true);
@@ -420,6 +450,29 @@ class VirtualFileSystem {
         }
 
         return "/" + String.join("/", path);
+    }
+
+    public boolean rmdir(String path) {
+        Node target = resolvePath(path);
+        if (target == null || !target.isDir || target == root) {
+            return false;
+        }
+
+        // Проверяем что директория пуста
+        if (target.children != null && !target.children.isEmpty()) {
+            return false;
+        }
+
+        return target.parent.children.remove(target.name) != null;
+    }
+
+    public boolean chown(String path, String owner) {
+        Node target = resolvePath(path);
+        if (target == null) {
+            return false;
+        }
+        target.owner = owner;
+        return true;
     }
 
     private Node resolvePath(String path) {
